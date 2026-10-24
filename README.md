@@ -1,13 +1,79 @@
-<pre>
->>> from Machine_Learning_for_Asset_Managers import ch2_fitKDE_find_best_bandwidth as c
->>> import numpy as np
->>> c.findOptimalBWidth(np.asarray([21,3]))
-{'bandwidth': 10.0}
-</pre>
-
 # 面向资产管理的机器学习
 
-本项目实现了 Marcos López de Prado 教授所著的[《面向资产管理的机器学习》（量化金融要素丛书）](https://www.amazon.com/Machine-Learning-Managers-Elements-Quantitative/dp/1108792898)中的代码片段和练习。
+本项目实现了 Marcos López de Prado 教授所著的[《面向资产管理的机器学习》（量化金融要素丛书）](https://www.amazon.com/Machine-Learning-Managers-Elements-Quantitative/dp/1108792898)中的代码片段和练习，并提供第 2—8 章的逐章 Notebook，在同一份基金数据上对照原实现与 skfolio。
+
+原章节源码保留在 [Machine_Learning_for_Asset_Managers/](Machine_Learning_for_Asset_Managers/)。Notebook 区分原算法、兼容复现和替代方法；没有直接对应接口的章节会明确说明，不将不同算法视为数值等价实现。
+
+## 快速开始
+
+在项目根目录使用已配置的 `ml4t` 环境。依赖版本统一维护在 [requirement.txt](requirement.txt)，需要安装时执行：
+
+```powershell
+conda activate ml4t
+python -m pip install -r requirement.txt
+```
+
+在支持 Notebook 的 IDE 或已有的 Jupyter 前端打开下表中的任意一本，选择 `ml4t` 环境对应的内核，重启内核并从头运行全部单元。每本均可独立运行，不依赖其他 Notebook 的执行状态；已保存的输出可直接阅读。
+
+不需要执行 `pip install .`。项目根目录可直接导入本地模块；[setup.py](setup.py) 仅保留原打包配置，不作为 Notebook 的依赖清单。第 8 章不导入原脚本中未使用的 CUDA 依赖，因此运行这些 Notebook 不需要安装 `cupy`。
+
+## 逐章 Notebook 导航
+
+| 章节 | Notebook | 主要对照与边界 |
+| --- | --- | --- |
+| 第 2 章：去噪与去市场成分 | [ch2_denoising_and_detoning.ipynb](ch2_denoising_and_detoning.ipynb) | 原去噪／去市场成分与 `DenoiseCovariance`／`DetoneCovariance`；分开比较关闭正定修复和默认配置。 |
+| 第 3 章：距离度量 | [ch3_distance_metrics.ipynb](ch3_distance_metrics.ipynb) | 角距离、互信息和信息变差；明确分箱与归一化口径，运行固定 20 箱的全资产互信息矩阵。 |
+| 第 4 章：最优聚类 | [ch4_optimal_clustering.ipynb](ch4_optimal_clustering.ipynb) | ONC Base／Top 与 `HierarchicalClustering`；统一成对距离评分，比较簇结构及方法一致性，而非宣称算法等价。 |
+| 第 5 章：金融标签 | [ch5_financial_labels.ipynb](ch5_financial_labels.ipynb) | 原回溯趋势扫描与日期语义修正版；skfolio 无直接对应接口，本章使用固定基金池中的单资产示例。 |
+| 第 6 章：特征重要性 | [ch6_feature_importance_analysis.ipynb](ch6_feature_importance_analysis.ipynb) | 原 MDI、MDA 兼容复现与 scikit-learn 参考；前向验证及聚类重要性，非 skfolio 直接实现。 |
+| 第 7 章：组合构建 | [ch7_portfolio_construction.ipynb](ch7_portfolio_construction.ipynb) | 解析 GMV、原 NCO 与 `MeanRisk`、`NestedClustersOptimization`、HRP；同簇受控对照与层次聚类＋前向验证分开。 |
+| 第 8 章：测试集过拟合 | [ch8_testing_set_overfitting.ipynb](ch8_testing_set_overfitting.ipynb) | 最大夏普期望、9 个策略试验、PSR／DSR；显式展示原公式修正与测试集选优偏差。 |
+
+## 公共模块与数据口径
+
+[notebook_common.py](notebook_common.py) 集中实现数据读取、训练期资产筛选、收益切分、随机种子与绘图配置，以及计时、日志压缩和矩阵诊断。章节算法仍保留在各自 Notebook 中。
+
+```python
+from notebook_common import load_data, setup_notebook
+
+setup_notebook(seed=42)
+data = load_data()
+X_train, X_test = data.X_train, data.X_test
+```
+
+- 数据来自 [data/hs_funds_prices.parquet](data/hs_funds_prices.parquet)，以 `timestamp` 为时间索引，其余列为基金价格；按日期排序并保留时区。
+- 使用最近 1,260 个价格观测：前 1,008 个用于训练，后 252 个用于测试。训练收益为 1,007 行；首个测试收益使用最后一个训练价格作为前一期价格。
+- 非有限或非正价格先标记为缺失，使用 `pct_change(fill_method=None)` 计算简单日收益，不做前向或后向填充。缺失价格会影响当日及下一日收益，不把跨缺失日期的涨跌当作单日收益。
+- 仅在训练收益上拟合 `skfolio.pre_selection.SelectComplete(drop_assets_with_internal_nan=True)` 和 `DropZeroVariance`。后者的总体方差阈值换算为 `1e-12 * (n-1) / n`，保持样本方差（`ddof=1`）大于 `1e-12` 的原筛选口径。
+- 基金代码排序后固定资产集合，默认使用全部合格基金。测试期不重新选择基金，只删除全部选定资产不能同时提供有效收益的日期。
+
+当前数据的默认运行规模如下；更新数据后以 `data.summary()` 为准：
+
+| 项目 | 当前结果 |
+| --- | --- |
+| 合格基金数 | 488 |
+| 训练收益 | 1,007 行，2021-07-14 至 2025-09-04 |
+| 测试候选日期 | 252 个，2025-09-05 至 2026-09-18 |
+| 共同有效测试日期 | 124 个，覆盖率 49.21% |
+| 排除测试日期 | 128 个 |
+
+初始化仅展示简洁数据摘要，不打印解释器、依赖版本或文件指纹。完整资产列表和排除日期可按需查看 `data.assets`、`data.excluded_test_dates`，原始测试收益保留在 `data.X_test_raw`。
+
+## 运行开关与结果解释
+
+- 含高成本扩展的章节默认设置 `RUN_EXPENSIVE = False`，不影响主对照实验使用全部合格基金。第 3 章对默认 Freedman 分箱设置单个二维直方图 400 万格的保护；超限会明确提示未运行，不会静默减少资产或更换分箱规则。
+- `ML4AM_SMOKE=1` 仅用于自动化冒烟测试，截取排序后的前 24 只合格基金。正常全量运行不设置该环境变量；不要将小规模输出覆盖为全量结果。
+- `DenoiseCovariance` 默认使用 `EmpiricalCovariance()`。关闭外层 `nearest` 不会关闭内层修复；第 2 章的受控对照同时关闭两层，默认配置另行展示。去市场成分后的矩阵理论上奇异，不能将其当作完整组合风险。
+- 第 7—8 章的主优化对照统一使用目标尺度 `1e4` 和 CLARABEL 容差 `1e-12`，以处理极小方差和病态协方差的数值问题；第 7 章另保留默认精度诊断。优化警告和失败记录不会被隐藏，近似解不等于达到全部指定容差。
+- 已对 7 本 Notebook 分别完成小规模与默认全量执行，并保存全量输出；公共模块重构前后的资产顺序和训练／测试收益已逐项验证一致。默认关闭的扩展不在这次全量验证范围内。
+
+**这些结果用于算法研究，不是连续、可交易的回测，也不是投资建议。** 测试期仅比较共同有效日期，未将缺失收益视为零；价格复权口径尚未确认，还需考虑存续偏差、交易成本和实际执行条件。第 8 章故意在测试结果上选优以展示选择偏差，该测试集不是选优后的独立验证集。ARI／NMI 衡量聚类方法一致性，PSR／DSR 接口返回概率型统计量，均不应误读为投资绩效保证。
+
+## 原项目章节笔记
+
+以下保留原项目的章节说明、公式记录与 `img/` 中的示意图；这些图不是上述基金数据实验的输出。实现差异、公式修正和适用限制以对应 Notebook 中的受控对照说明为准。
+
+### ONC 算法注意事项
 
 注意：书中第 4 章的“最优聚类数量”（Optimal Number of Clusters，ONC）算法实现存在一个错误。 
 （de Prado 和 Lewis 于 2018 年发表的论文《使用无监督学习方法识别虚假投资策略》中的代码与书中不同，但同样存在错误。）
@@ -35,7 +101,7 @@ Marčenko–Pastur 理论概率密度函数与经验密度函数：
 
 注意：练习 2.7：“扩展代码片段 2.2 中的 fitKDE 函数，使其通过交叉验证估计 bWidth（带宽）的最优值。”
 
-脚本 ch2_fitKDE_find_bandwidth.py 实现了这一过程，并生成了图 2.3 中的绿色核密度估计（KDE）曲线：
+脚本 [ch2_fitKDE_find_best_bandwidth.py](Machine_Learning_for_Asset_Managers/ch2_fitKDE_find_best_bandwidth.py) 实现了这一过程，并生成了图 2.3 中的绿色核密度估计（KDE）曲线：
 | ![gaussian_mp_excersize_2_7.png](img/gaussian_mp_excersize_2_7.png) | 
 |:--:| 
 | *图 2.3：使用计算所得带宽绘制的 KDE 曲线（绿色），以及直方图和概率密度函数（PDF）。绿色曲线更加平滑。求得的带宽为：0.03511191734215131。* |
@@ -176,7 +242,7 @@ Marčenko–Pastur 理论概率密度函数与经验密度函数：
 时间序列之间的高度相关性意味着相关矩阵具有较高的条件数。
 
 ### Markowitz 诅咒
-只有当相关系数 $\ro = 0$，即不存在相关性时，相关矩阵 C 才是稳定的。
+只有当相关系数 $ro = 0$，即不存在相关性时，相关矩阵 C 才是稳定的。
 
 层次风险平价（HRP）在样本外蒙特卡洛实验中的表现优于 Markowitz 方法，但在样本内并非最优。
 
