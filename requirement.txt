@@ -1,0 +1,26 @@
+# 已验证的 Python 3.12 Notebook 环境；在项目根目录可直接导入本地模块。
+# 安装依赖：python -m pip install -r requirement.txt
+# 不需要安装本项目，也不需要 cupy。
+
+# 数据处理、算法与绘图
+numpy==2.4.6
+pandas==3.0.5
+scipy==1.18.0
+scikit-learn==1.9.0
+skfolio==1.9.11
+matplotlib==3.11.1
+seaborn==0.13.2
+statsmodels==0.14.6
+pyarrow==25.0.0
+threadpoolctl==3.6.0
+
+# 组合优化：cvxpy-base 提供 cvxpy 模块，使用 CLARABEL 求解器。
+cvxpy-base==1.9.2
+clarabel==0.11.1
+
+# Notebook 内核与执行
+ipython==9.16.1
+ipykernel==7.3.0
+nbformat==5.11.1
+nbclient==0.11.0
+jupyter-client==8.9.1
