@@ -72,8 +72,9 @@ def prepare_data(
     variance_threshold: float = 1e-12,
     smoke: bool = False,
 ) -> ExperimentData:
-    """按训练期筛选资产，测试期只筛选共同有效日期，不重新选择资产。
+    """按训练期筛选资产，测试期填充缺失收益并保留全部日期，不重新选择资产。
 
+    测试收益先用前值向后填充，再用后值补齐头部缺失；头部回填使用后续收益。
     输入为时间索引的价格表；保留时区并排序。非有限/非正价格先标记为缺失，
     pct_change(fill_method=None) 不跨缺失日期计算收益。
     SelectComplete 显式排除内部缺失；DropZeroVariance 的总体方差阈值
@@ -113,9 +114,11 @@ def prepare_data(
     selected_returns = returns.loc[:, assets]
     X_train = selected_returns.iloc[1:train_prices].copy()
     X_test_raw = selected_returns.iloc[train_prices:].copy()
-    X_test = X_test_raw.dropna(how='any').copy()
+    X_test = X_test_raw.ffill().bfill().copy()
+    if X_test.isna().any().any():
+        raise ValueError('测试期存在收益全部缺失的基金，无法填充')
     if len(X_test) < 3:
-        raise ValueError('共同有效的测试收益日期少于3天')
+        raise ValueError('测试收益日期少于3天')
     return ExperimentData(
         prices=prices_window.loc[:, assets].copy(),
         X_train=X_train,
