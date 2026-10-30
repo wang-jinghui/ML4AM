@@ -5,6 +5,7 @@
 """
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from time import perf_counter
 import io
@@ -27,6 +28,7 @@ class ExperimentData:
     X_test: pd.DataFrame
     eligible_count: int
     smoke: bool = False
+    p: float = 0.0
 
     @property
     def assets(self) -> pd.Index:
@@ -40,6 +42,7 @@ class ExperimentData:
         """只展示与实验相关的数据规模、时间范围和测试覆盖率。"""
         return pd.Series({
             '数据模式': '小规模验证' if self.smoke else '全部合格基金',
+            '每侧缩尾比例': f'{self.p:.2%}',
             '训练期合格基金数': self.eligible_count,
             '本次使用基金数': len(self.assets),
             '训练收益行数': len(self.X_train),
@@ -70,6 +73,7 @@ def prepare_data(
     window: int = 1260,
     train_prices: int = 1008,
     variance_threshold: float = 1e-12,
+    p: float = 0.0,
     smoke: bool = False,
 ) -> ExperimentData:
     """按训练期筛选资产，测试期填充缺失收益并保留全部日期，不重新选择资产。
@@ -77,6 +81,11 @@ def prepare_data(
     测试收益先用前值向后填充，再用后值补齐头部缺失；头部回填使用后续收益。
     输入为时间索引的价格表；保留时区并排序。非有限/非正价格先标记为缺失，
     pct_change(fill_method=None) 不跨缺失日期计算收益。
+    p 为每侧缩尾比例，取值 0 <= p < 0.5；默认 0 不处理，0.01 表示每侧 1%。
+    启用时按各资产训练收益的 p 和 1-p 分位数双侧裁剪，测试收益复用训练阈值；
+    不删除日期、不修改价格，X_test_raw 保留未填充、未缩尾的测试收益。
+    低方差筛选在缩尾后拟合，避免缩尾产生常量列；启用后合格资产可能减少。
+    缩尾是稳健化处理，不是行情纠错；处理后的测试收益不代表真实尾部风险。
     SelectComplete 显式排除内部缺失；DropZeroVariance 的总体方差阈值
     换算为 variance_threshold * (n-1)/n，以保持原 ddof=1 的样本方差标准。
     smoke 仅用于自动化验证，正常调用使用全部合格基金。
@@ -89,6 +98,8 @@ def prepare_data(
         raise ValueError('需满足 3 <= 训练价格数 < 窗口长度 <= 数据长度')
     if not np.isfinite(variance_threshold) or variance_threshold < 0:
         raise ValueError('方差阈值必须有限且非负')
+    if not isinstance(p, Real) or not np.isfinite(p) or not 0 <= p < 0.5:
+        raise ValueError('p 必须是满足 0 <= p < 0.5 的有限数值；0.01 表示每侧缩尾 1%')
 
     prices_window = prices.sort_index().tail(window)
     valid_prices = prices_window.where(np.isfinite(prices_window) & prices_window.gt(0))
@@ -100,6 +111,10 @@ def prepare_data(
     if not complete.get_support().any():
         raise ValueError('训练期没有收益完整的基金')
     complete_train = complete.transform(train_returns)
+    if p > 0:
+        lower = complete_train.quantile(p)
+        upper = complete_train.quantile(1 - p)
+        complete_train = complete_train.clip(lower=lower, upper=upper, axis='columns')
     n = len(complete_train)
     variance = DropZeroVariance(threshold=variance_threshold * (n - 1) / n)
     variance.fit(complete_train)
@@ -112,9 +127,11 @@ def prepare_data(
 
     # 方差过滤器不接受测试段的 NaN，按训练期学得的列掩码固定资产集合。
     selected_returns = returns.loc[:, assets]
-    X_train = selected_returns.iloc[1:train_prices].copy()
+    X_train = complete_train.loc[:, assets].copy()
     X_test_raw = selected_returns.iloc[train_prices:].copy()
     X_test = X_test_raw.ffill().bfill().copy()
+    if p > 0:
+        X_test = X_test.clip(lower=lower.loc[assets], upper=upper.loc[assets], axis='columns')
     if X_test.isna().any().any():
         raise ValueError('测试期存在收益全部缺失的基金，无法填充')
     if len(X_test) < 3:
@@ -126,6 +143,7 @@ def prepare_data(
         X_test=X_test,
         eligible_count=eligible_count,
         smoke=smoke,
+        p=p,
     )
 
 
@@ -135,16 +153,20 @@ def load_data(
     window: int = 1260,
     train_prices: int = 1008,
     variance_threshold: float = 1e-12,
+    p: float = 0.0,
     smoke: bool | None = None,
 ) -> ExperimentData:
-    """读取项目价格数据；ML4AM_SMOKE=1 仅用于不保存输出的冒烟测试。"""
+    """读取项目价格数据；p 为每侧收益缩尾比例，0 关闭，0.01 表示每侧 1%。
+
+    缩尾阈值仅拟合训练收益；ML4AM_SMOKE=1 仅用于不保存输出的冒烟测试。
+    """
     if path is None:
         path = Path(__file__).resolve().parent / 'data' / 'hs_funds_prices.parquet'
     if smoke is None:
         smoke = os.environ.get('ML4AM_SMOKE', '0') == '1'
     prices = pd.read_parquet(path).set_index('timestamp')
     return prepare_data(prices, window=window, train_prices=train_prices,
-                        variance_threshold=variance_threshold, smoke=smoke)
+                        variance_threshold=variance_threshold, p=p, smoke=smoke)
 
 
 def timed(label, function):
