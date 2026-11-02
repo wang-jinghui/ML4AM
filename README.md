@@ -1,6 +1,6 @@
 # 面向资产管理的机器学习
 
-本项目实现了 Marcos López de Prado 教授所著的[《面向资产管理的机器学习》（量化金融要素丛书）](https://www.amazon.com/Machine-Learning-Managers-Elements-Quantitative/dp/1108792898)中的代码片段和练习，并提供第 2—8 章的逐章 Notebook，在同一份基金数据上对照原实现与 skfolio。
+本项目实现了 Marcos López de Prado 教授所著的[《面向资产管理的机器学习》（量化金融要素丛书）](https://www.amazon.com/Machine-Learning-Managers-Elements-Quantitative/dp/1108792898)中的代码片段和练习，并提供第 2—8 章的逐章 Notebook，在同一份基金数据上对照原实现与 skfolio；第 5 章练习另有三本：[ch5_meta_labeling.ipynb](ch5_meta_labeling.ipynb) 实现三重障碍标签与 meta-labeling 全流程，[ch5_meta_labeling2.ipynb](ch5_meta_labeling2.ipynb) 把资产池缩到单个聚类簇重做同一流程，[ch5_meta_labeling3.ipynb](ch5_meta_labeling3.ipynb) 反过来把聚类结果当作特征喂给模型并做置换检验。
 
 原章节源码保留在 [Machine_Learning_for_Asset_Managers/](Machine_Learning_for_Asset_Managers/)。Notebook 区分原算法、兼容复现和替代方法；没有直接对应接口的章节会明确说明，不将不同算法视为数值等价实现。
 
@@ -24,7 +24,10 @@ python -m pip install -r requirement.txt
 | 第 2 章：去噪与去市场成分 | [ch2_denoising_and_detoning.ipynb](ch2_denoising_and_detoning.ipynb) | 原去噪／去市场成分与 `DenoiseCovariance`／`DetoneCovariance`；分开比较关闭正定修复和默认配置。 |
 | 第 3 章：距离度量 | [ch3_distance_metrics.ipynb](ch3_distance_metrics.ipynb) | 角距离、互信息和信息变差；明确分箱与归一化口径，运行固定 20 箱的全资产互信息矩阵。 |
 | 第 4 章：最优聚类 | [ch4_optimal_clustering.ipynb](ch4_optimal_clustering.ipynb) | ONC Base／Top 与 `HierarchicalClustering`；统一成对距离评分，比较簇结构及方法一致性，而非宣称算法等价。 |
-| 第 5 章：金融标签 | [ch5_financial_labels.ipynb](ch5_financial_labels.ipynb) | 原回溯趋势扫描与日期语义修正版；skfolio 无直接对应接口，本章使用固定基金池中的单资产示例。 |
+| 第 5 章：金融标签 | [ch5_financial_labels.ipynb](ch5_financial_labels.ipynb) | 原回溯趋势扫描、日期语义修正与标签可比性边界；skfolio 无直接对应接口，本章使用固定基金池中的单资产示例。 |
+| 第 5 章练习：三重障碍与 meta-labeling | [ch5_meta_labeling.ipynb](ch5_meta_labeling.ipynb) | 按练习 a–e 分节：三重障碍标签、primary 随机森林、同规则回测、走查生成样本外预测并构造 meta 标签、复训 meta 模型（硬标签为主、概率为对照）、按 meta 概率调仓；附只做多变体与重叠事件诊断。 |
+| 第 5 章练习（二）：单簇训练 | [ch5_meta_labeling2.ipynb](ch5_meta_labeling2.ipynb) | 按 `cluster_membership_denoise.csv` 的层次聚类结果只在单个簇内重训 a–e；量化各簇三重障碍标签分布的异质性与特征重要性迁移，并用全样本模型在同一测试集上做对照。 |
+| 第 5 章练习（三）：簇作为特征 | [ch5_meta_labeling3.ipynb](ch5_meta_labeling3.ipynb) | 不缩池，把簇的四种编码（整数、独热、簇画像、簇内标准化）作为特征输入；用随机簇标签与打乱编号的置换实验剥离树的容量效应，并在回测层面重做一次容量对照。 |
 | 第 6 章：特征重要性 | [ch6_feature_importance_analysis.ipynb](ch6_feature_importance_analysis.ipynb) | 原 MDI、MDA 兼容复现与 scikit-learn 参考；前向验证及聚类重要性，非 skfolio 直接实现。 |
 | 第 7 章：组合构建 | [ch7_portfolio_construction.ipynb](ch7_portfolio_construction.ipynb) | 解析 GMV、原 NCO 与 `MeanRisk`、`NestedClustersOptimization`、HRP；同簇受控对照与层次聚类＋前向验证分开。 |
 | 第 8 章：测试集过拟合 | [ch8_testing_set_overfitting.ipynb](ch8_testing_set_overfitting.ipynb) | 最大夏普期望、9 个策略试验、PSR／DSR；显式展示原公式修正与测试集选优偏差。 |
@@ -46,6 +49,7 @@ X_train, X_test = data.X_train, data.X_test
 - 非有限或非正价格先标记为缺失，使用 `pct_change(fill_method=None)` 计算简单日收益，不做前向或后向填充。缺失价格会影响当日及下一日收益，不把跨缺失日期的涨跌当作单日收益。
 - 仅在训练收益上拟合 `skfolio.pre_selection.SelectComplete(drop_assets_with_internal_nan=True)` 和 `DropZeroVariance`。后者的总体方差阈值换算为 `1e-12 * (n-1) / n`，保持样本方差（`ddof=1`）大于 `1e-12` 的原筛选口径。
 - 基金代码排序后固定资产集合，默认使用全部合格基金。测试期不重新选择基金，只删除全部选定资产不能同时提供有效收益的日期。
+- 三本第 5 章练习 Notebook 都需要 60 日滚动特征，因此额外向前读取 120 个价格作预热；训练／测试切分仍以最近 1,260 个观测为准，且训练事件的结束日必须早于测试期首日（purge），不使用样本内预测生成 meta 标签。单簇版不重新聚类，直接读取 [cluster_membership_denoise.csv](cluster_membership_denoise.csv) 的层次聚类标签，并在同一测试窗口上与全样本模型对照；簇特征版用同一文件的簇标签作特征，并用训练期前后半段的重聚类检验其时间稳定性。
 
 当前数据的默认运行规模如下；更新数据后以 `data.summary()` 为准：
 
@@ -54,8 +58,8 @@ X_train, X_test = data.X_train, data.X_test
 | 合格基金数 | 488 |
 | 训练收益 | 1,007 行，2021-07-14 至 2025-09-04 |
 | 测试候选日期 | 252 个，2025-09-05 至 2026-09-18 |
-| 共同有效测试日期 | 124 个，覆盖率 49.21% |
-| 排除测试日期 | 128 个 |
+| 共同有效测试日期 | 252 个，覆盖率 100.00% |
+| 排除测试日期 | 0 个 |
 
 初始化仅展示简洁数据摘要，不打印解释器、依赖版本或文件指纹。完整资产列表和排除日期可按需查看 `data.assets`、`data.excluded_test_dates`，原始测试收益保留在 `data.X_test_raw`。
 
@@ -65,7 +69,7 @@ X_train, X_test = data.X_train, data.X_test
 - `ML4AM_SMOKE=1` 仅用于自动化冒烟测试，截取排序后的前 24 只合格基金。正常全量运行不设置该环境变量；不要将小规模输出覆盖为全量结果。
 - `DenoiseCovariance` 默认使用 `EmpiricalCovariance()`。关闭外层 `nearest` 不会关闭内层修复；第 2 章的受控对照同时关闭两层，默认配置另行展示。去市场成分后的矩阵理论上奇异，不能将其当作完整组合风险。
 - 第 7—8 章的主优化对照统一使用目标尺度 `1e4` 和 CLARABEL 容差 `1e-12`，以处理极小方差和病态协方差的数值问题；第 7 章另保留默认精度诊断。优化警告和失败记录不会被隐藏，近似解不等于达到全部指定容差。
-- 已对 7 本 Notebook 分别完成小规模与默认全量执行，并保存全量输出；公共模块重构前后的资产顺序和训练／测试收益已逐项验证一致。默认关闭的扩展不在这次全量验证范围内。
+- 已对 10 本 Notebook（第 2—8 章各一本，加第 5 章练习三本）分别完成小规模与默认全量执行，并保存全量输出；公共模块重构前后的资产顺序和训练／测试收益已逐项验证一致。默认关闭的扩展不在这次全量验证范围内。
 
 **这些结果用于算法研究，不是连续、可交易的回测，也不是投资建议。** 测试期仅比较共同有效日期，未将缺失收益视为零；价格复权口径尚未确认，还需考虑存续偏差、交易成本和实际执行条件。第 8 章故意在测试结果上选优以展示选择偏差，该测试集不是选优后的独立验证集。ARI／NMI 衡量聚类方法一致性，PSR／DSR 接口返回概率型统计量，均不应误读为投资绩效保证。
 
